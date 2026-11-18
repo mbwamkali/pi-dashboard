@@ -532,6 +532,8 @@ def screenshot():
         power = "off" if '"off"' in out else "on" if '"on"' in out else "unknown"
     except Exception:
         pass
+    if power == "off":
+        raise RuntimeError("The screen is turned off right now (night schedule), so there's nothing to show.")
     img = subprocess.run(["grim", "-l", "1", "-s", "0.5", "-"],
                          env=env, capture_output=True, timeout=15)
     if img.returncode != 0 or not img.stdout:
