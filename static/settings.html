@@ -76,6 +76,7 @@
     <section>
       <h2>Panels on the list screen</h2>
       <label class="row"><span>To Do</span><input type="checkbox" id="panel-todo"></label>
+      <label class="row"><span>Coming Up <span class="hint">(countdown to all-day events)</span></span><input type="checkbox" id="panel-countdown"></label>
       <label class="row"><span>Come Follow Me</span><input type="checkbox" id="panel-cfm"></label>
       <label class="row"><span>Word of the Day</span><input type="checkbox" id="panel-wotd"></label>
       <label class="row"><span>Dad Joke</span><input type="checkbox" id="panel-joke"></label>
@@ -83,7 +84,7 @@
 
     <section>
       <h2>Calendars</h2>
-      <div class="hint">None ticked = the calendars that are ticked in Google Calendar. The box under each one is its short name in the calendar key.</div>
+      <div class="hint">None ticked = the calendars that are ticked in Google Calendar. Under each one: its short name in the calendar key, and its color on the dashboard.</div>
       <div id="calendars"></div>
       <h2 style="margin-top:16px">Task lists</h2>
       <div class="hint">None ticked = your default list.</div>
@@ -108,6 +109,16 @@
       <label class="row"><span>Off at</span><input type="time" id="screen-off"></label>
       <label class="row"><span>Back on at</span><input type="time" id="screen-on"></label>
       <div class="hint">Takes effect within a minute.</div>
+    </section>
+
+    <section>
+      <h2>Evening dimming</h2>
+      <label class="row"><span>Dim the screen in the evening</span><input type="checkbox" id="dim-enabled"></label>
+      <label class="row"><span>From</span><input type="time" id="dim-from"></label>
+      <label class="row"><span>Until</span><input type="time" id="dim-to"></label>
+      <label class="row"><span>How dim <span class="hint" id="dim-level-label"></span></span>
+        <input type="range" id="dim-level" min="10" max="90" step="5" style="width:140px"></label>
+      <div class="hint">Darkens the picture gradually; the screen stays on.</div>
     </section>
 
     <section>
@@ -152,7 +163,11 @@ async function api(method, url, body, isFile) {
 function checkList(el, items, chosen, labels) {
   el.innerHTML = items.map((c) => `<label class="row"><span>${c.color ? `<span class="swatch" style="background:${esc(c.color)}"></span>` : ""}${esc(c.name)}</span>
     <input type="checkbox" value="${esc(c.id)}" ${chosen.includes(c.id) || chosen.includes(c.name) ? "checked" : ""}></label>
-    ${labels ? `<input type="text" class="cal-label" data-id="${esc(c.id)}" maxlength="30" placeholder="Name in key: ${esc(String(c.name).split("@")[0])}" value="${esc(labels[c.id] || "")}" style="margin:0 0 6px">` : ""}`).join("")
+    ${labels ? `<div style="display:flex;gap:8px;align-items:center;margin:0 0 6px">
+      <input type="text" class="cal-label" data-id="${esc(c.id)}" maxlength="30" placeholder="Name in key: ${esc(String(c.name).split("@")[0])}" value="${esc(labels[c.id] || "")}">
+      <input type="color" class="cal-color" data-id="${esc(c.id)}" data-google="${esc(c.googleColor || c.color || "")}" value="${esc(c.color || "#4285f4")}"
+        title="Color on the dashboard" style="width:44px;height:38px;padding:2px;border:1px solid var(--line);border-radius:8px;background:var(--bg)">
+    </div>` : ""}`).join("")
     || `<div class="hint" style="padding:8px 0">Not available until you've signed in to Google.</div>`;
 }
 const picked = (el) => [...el.querySelectorAll("input:checked")].map((i) => i.value);
@@ -165,12 +180,18 @@ async function load() {
   for (const k of ["view_seconds", "weeks_to_show", "agenda_days", "photo_interval_seconds", "come_follow_me_manual", "units"]) $(k).value = c[k];
   for (const k of ["clock_24h", "show_seconds"]) $(k).checked = !!c[k];
   $("show_key").checked = c.show_key !== false;
-  for (const k of ["todo", "cfm", "wotd", "joke"]) $(`panel-${k}`).checked = c.panels?.[k] !== false;
+  for (const k of ["todo", "countdown", "cfm", "wotd", "joke"]) $(`panel-${k}`).checked = c.panels?.[k] !== false;
   $("location").value = c.location?.name || "";
   const sc = c.screen || {};
   $("screen-enabled").checked = !!(sc.off && sc.on);
   $("screen-off").value = sc.off || "22:30";
   $("screen-on").value = sc.on || "06:00";
+  const dm = c.dim || {};
+  $("dim-enabled").checked = !!(dm.from && dm.to);
+  $("dim-from").value = dm.from || "21:00";
+  $("dim-to").value = dm.to || "06:00";
+  $("dim-level").value = dm.level || 45;
+  $("dim-level-label").textContent = `(${$("dim-level").value}%)`;
   checkList($("calendars"), state.sources.calendars, c.calendars || [], c.calendar_labels || {});
   checkList($("taskLists"), state.sources.taskLists, c.task_lists || []);
   $("sourcesError").textContent = state.sourcesError ? `Couldn't load from Google: ${state.sourcesError}` : "";
@@ -193,14 +214,20 @@ $("save").onclick = async () => {
     agenda_days: +$("agenda_days").value, photo_interval_seconds: +$("photo_interval_seconds").value,
     clock_24h: $("clock_24h").checked, show_seconds: $("show_seconds").checked, units: $("units").value,
     show_key: $("show_key").checked,
-    panels: Object.fromEntries(["todo", "cfm", "wotd", "joke"].map((k) => [k, $(`panel-${k}`).checked])),
+    panels: Object.fromEntries(["todo", "countdown", "cfm", "wotd", "joke"].map((k) => [k, $(`panel-${k}`).checked])),
     come_follow_me_manual: $("come_follow_me_manual").value.trim(),
     screen: $("screen-enabled").checked ? { off: $("screen-off").value, on: $("screen-on").value } : { off: "", on: "" },
+    dim: $("dim-enabled").checked ? { from: $("dim-from").value, to: $("dim-to").value, level: +$("dim-level").value }
+      : { from: "", to: "", level: +$("dim-level").value },
   };
   if (state.sources.calendars.length) {
     changes.calendars = picked($("calendars"));
     changes.calendar_labels = Object.fromEntries([...document.querySelectorAll(".cal-label")]
       .map((i) => [i.dataset.id, i.value.trim()]).filter(([, v]) => v));
+    // Only colors changed from Google Calendar's own are saved.
+    changes.calendar_colors = Object.fromEntries([...document.querySelectorAll(".cal-color")]
+      .filter((i) => i.value.toLowerCase() !== (i.dataset.google || "").toLowerCase())
+      .map((i) => [i.dataset.id, i.value]));
   }
   if (state.sources.taskLists.length) changes.task_lists = picked($("taskLists"));
   // Changing the town clears saved coordinates so it gets looked up again.
@@ -211,6 +238,7 @@ $("save").onclick = async () => {
   finally { $("save").disabled = false; }
 };
 
+$("dim-level").oninput = () => { $("dim-level-label").textContent = `(${$("dim-level").value}%)`; };
 $("add").onclick = () => $("upload").click();
 $("upload").onchange = async (ev) => {
   const files = [...ev.target.files];

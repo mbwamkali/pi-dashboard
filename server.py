@@ -48,18 +48,20 @@ DEFAULT_CONFIG = {
     "views": ["month", "list"],
     "view_seconds": 45,
     "agenda_days": 14,
-    "panels": {"todo": True, "cfm": True, "wotd": True, "joke": True},
+    "panels": {"todo": True, "countdown": True, "cfm": True, "wotd": True, "joke": True},
     "location": {"name": "", "latitude": None, "longitude": None},
     "units": "fahrenheit",
     "clock_24h": False,
     "show_seconds": True,
     "calendars": [],
     "calendar_labels": {},
+    "calendar_colors": {},
     "show_key": True,
     "task_lists": [],
     "photos_dir": "photos",
     "photo_interval_seconds": 60,
     "screen": {"off": "", "on": ""},
+    "dim": {"from": "", "to": "", "level": 45},
     "weeks_to_show": 5,
     "come_follow_me_manual": "https://www.churchofjesuschrist.org/study/manual/come-follow-me-for-home-and-church-old-testament-2026",
     "refresh_minutes": {
@@ -152,8 +154,10 @@ class Google:
         event_colors = cal.colors().get().execute().get("event", {})
 
         events = []
+        overrides = cfg.get("calendar_colors") or {}
+        cal_color = {c["id"]: overrides.get(c["id"]) or c.get("backgroundColor", "#4285f4") for c in chosen}
         key = [{"name": calendar_label(cfg, c["id"], c.get("summaryOverride") or c.get("summary")),
-                "color": c.get("backgroundColor", "#4285f4")} for c in chosen]
+                "color": cal_color[c["id"]]} for c in chosen]
         for c in chosen:
             page = None
             while True:
@@ -165,7 +169,7 @@ class Google:
                     if e.get("status") == "cancelled":
                         continue
                     s, en = e.get("start", {}), e.get("end", {})
-                    color = c.get("backgroundColor", "#4285f4")
+                    color = cal_color[c["id"]]
                     if e.get("colorId") in event_colors:
                         color = event_colors[e["colorId"]]["background"]
                     events.append({
@@ -186,7 +190,8 @@ class Google:
         """Calendars and task lists available to choose from on the settings page."""
         cal, svc = self._services()
         cals = [{"id": c["id"], "name": c.get("summaryOverride") or c.get("summary"),
-                 "color": c.get("backgroundColor"), "selected": bool(c.get("selected"))}
+                 "color": (cfg.get("calendar_colors") or {}).get(c["id"]) or c.get("backgroundColor"),
+                 "googleColor": c.get("backgroundColor"), "selected": bool(c.get("selected"))}
                 for c in cal.calendarList().list().execute().get("items", [])]
         lists = [{"id": l["id"], "name": l["title"]}
                  for l in svc.tasklists().list(maxResults=100).execute().get("items", [])]
@@ -251,6 +256,7 @@ def weather(cfg):
         "latitude": lat, "longitude": lon,
         "current": "temperature_2m,apparent_temperature,weather_code,is_day",
         "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum",
+        "hourly": "temperature_2m,weather_code,precipitation_probability,is_day",
         "temperature_unit": "fahrenheit" if f else "celsius",
         "precipitation_unit": "inch" if f else "mm",
         "timezone": "auto", "forecast_days": 16,
@@ -269,8 +275,24 @@ def weather(cfg):
             "pop": daily["precipitation_probability_max"][i],
             "precip": daily["precipitation_sum"][i],
         })
+    hourly, hours = d.get("hourly") or {}, []
+    now_hour = cur["time"][:13]  # "2026-11-18T07"
+    times = hourly.get("time") or []
+    start = next((i for i, t in enumerate(times) if t[:13] >= now_hour), None)
+    if start is not None:
+        for i in range(start + 1, min(start + 13, len(times))):
+            if hourly["temperature_2m"][i] is None:
+                continue
+            hours.append({
+                "time": times[i],
+                "temp": round(hourly["temperature_2m"][i]),
+                "code": hourly["weather_code"][i],
+                "pop": hourly["precipitation_probability"][i] or 0,
+                "isDay": bool(hourly["is_day"][i]),
+            })
     return {
         "location": name,
+        "hours": hours,
         "temp": round(cur["temperature_2m"]),
         "feels": round(cur["apparent_temperature"]),
         "code": cur["weather_code"],
@@ -441,6 +463,7 @@ class Cache:
                     "agendaDays": self.cfg["agenda_days"],
                     "panels": self.cfg["panels"],
                     "showKey": self.cfg.get("show_key", True),
+                    "dim": self.cfg.get("dim") or {},
                 },
             }
 
@@ -479,8 +502,12 @@ EDITABLE = {  # key: validator
     "calendars": lambda v: [str(x) for x in v][:50],
     "calendar_labels": lambda v: {str(k)[:200]: str(x).strip()[:30] for k, x in list(v.items())[:50] if str(x).strip()},
     "show_key": bool,
+    "calendar_colors": lambda v: {str(k)[:200]: str(x) for k, x in list(v.items())[:50]
+                                  if re.fullmatch(r"#[0-9a-fA-F]{6}", str(x))},
+    "dim": lambda v: {"from": hhmm(v.get("from")), "to": hhmm(v.get("to")),
+                      "level": max(10, min(90, int(v.get("level") or 45)))},
     "task_lists": lambda v: [str(x) for x in v][:20],
-    "panels": lambda v: {k: bool(v.get(k, True)) for k in ("todo", "cfm", "wotd", "joke")},
+    "panels": lambda v: {k: bool(v.get(k, True)) for k in ("todo", "countdown", "cfm", "wotd", "joke")},
     "come_follow_me_manual": lambda v: str(v)[:300],
     "screen": lambda v: {k: hhmm(v.get(k)) for k in ("off", "on")},
 }

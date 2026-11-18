@@ -103,7 +103,8 @@ On any phone or computer on your home Wi-Fi, open `http://<pi-ip>:8080/settings`
 - tick which Google calendars and task lists to show, and give each calendar a short
   name for the color key under the clock (e.g. an email address → "Grandma"),
 - switch 12/24-hour clock, seconds, °F/°C and your town,
-- turn the screen off at night (e.g. 22:30 to 06:00),
+- turn the screen off at night (e.g. 22:30 to 06:00), or dim it in the evening,
+- change each calendar's color on the dashboard,
 - add or delete background photos straight from your phone's camera roll.
 
 Press **Save**; the dashboard picks it up within 30 seconds, no restart. Your
