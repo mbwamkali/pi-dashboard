@@ -30,9 +30,18 @@
     button { font: inherit; border: 0; border-radius: 8px; padding: 10px 16px; cursor: pointer; background: var(--accent); color: #fff; font-weight: 600; }
     button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
     button:disabled { opacity: .5; }
-    .photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-top: 12px; }
-    .photo { position: relative; aspect-ratio: 4/3; border-radius: 8px; background: center/cover var(--bg); }
+    .photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-top: 6px; }
+    .photo { position: relative; aspect-ratio: 4/3; border-radius: 8px; background: center/cover var(--bg); overflow: hidden; }
+    .photo video { width: 100%; height: 100%; object-fit: cover; display: block; }
     .photo button { position: absolute; top: 4px; right: 4px; padding: 2px 8px; background: rgba(0,0,0,.6); font-size: 13px; }
+    .photo .play { position: absolute; left: 6px; bottom: 4px; color: #fff; font-size: 14px; text-shadow: 0 1px 3px #000; }
+    .folder-h { font-size: 14px; color: var(--muted); margin: 14px 0 0; display: flex; align-items: center; gap: 6px; }
+    .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 16px; text-align: center; margin: 12px 0;
+      transition: background .2s, border-color .2s; }
+    .drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+    .drop .btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 10px; }
+    .progress { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 10px; display: none; }
+    .progress div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
     .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 8px; opacity: 0; transition: opacity .3s; pointer-events: none; }
     .toast.show { opacity: 1; }
     .err { color: var(--danger); font-size: 14px; }
@@ -122,11 +131,24 @@
     </section>
 
     <section>
-      <h2>Photos</h2>
-      <label class="row"><span>Change photo every <span class="hint">(seconds)</span></span><input type="number" id="photo_interval_seconds" min="10"></label>
-      <input type="file" id="upload" accept="image/*" multiple hidden>
-      <button class="ghost" id="add">Add photos…</button>
-      <div class="photos" id="photos"></div>
+      <h2>Photos &amp; videos</h2>
+      <label class="row"><span>Change photo every <span class="hint">(seconds; videos play to the end, without sound)</span></span><input type="number" id="photo_interval_seconds" min="10"></label>
+      <div id="folderPick"></div>
+      <div class="drop" id="drop">
+        <div>Drag photos, videos or whole folders here</div>
+        <div class="hint">Folders keep their name on the dashboard. Videos: .mp4, .mov, .webm.</div>
+        <div class="btns">
+          <button class="ghost" id="add">Add photos or videos…</button>
+          <button class="ghost" id="addFolder">Add a folder…</button>
+        </div>
+        <label class="row" style="border:0;padding-bottom:0"><span class="hint">Put added files in folder</span>
+          <input type="text" id="intoFolder" list="folderList" placeholder="(none)" style="width:55%"></label>
+        <datalist id="folderList"></datalist>
+        <div class="progress" id="progress"><div></div></div>
+      </div>
+      <input type="file" id="upload" accept="image/*,video/*" multiple hidden>
+      <input type="file" id="uploadFolder" webkitdirectory multiple hidden>
+      <div id="photos"></div>
     </section>
 
     <section>
@@ -199,9 +221,25 @@ async function load() {
 }
 
 async function loadPhotos() {
-  const r = await (await fetch("/api/photos", { cache: "no-store" })).json();
-  $("photos").innerHTML = r.photos.map((u) => `<div class="photo" style="background-image:url('${u}')">
-    <button data-url="${u}" aria-label="Delete photo">✕</button></div>`).join("") || `<div class="hint">No photos yet.</div>`;
+  const r = await (await fetch("/api/photos?all=1", { cache: "no-store" })).json();
+  const items = r.items || [];
+  // Which folders the slideshow uses (only shown once there are folders).
+  const folders = r.folders || [], chosen = r.chosen || [];
+  const hasLoose = items.some((i) => !i.folder);
+  $("folderPick").innerHTML = folders.length ? `<div class="hint" style="margin-top:8px">Show on the dashboard (none ticked = everything):</div>` +
+    [...(hasLoose ? [["", "Photos not in a folder"]] : []), ...folders.map((f) => [f, f])].map(([v, label]) =>
+      `<label class="row"><span>📁 ${esc(label)}</span><input type="checkbox" class="pick-folder" value="${esc(v)}" ${chosen.includes(v) ? "checked" : ""}></label>`).join("") : "";
+  $("folderList").innerHTML = folders.map((f) => `<option value="${esc(f)}">`).join("");
+  // Thumbnails, grouped by folder.
+  const groups = {};
+  for (const i of items) (groups[i.folder] ||= []).push(i);
+  $("photos").innerHTML = Object.keys(groups).sort().map((f) => `
+    ${f || Object.keys(groups).length > 1 ? `<div class="folder-h">📁 ${esc(f || "Not in a folder")} <span class="hint">(${groups[f].length})</span></div>` : ""}
+    <div class="photos">${groups[f].map((i) => i.video
+      ? `<div class="photo"><video src="${i.url}#t=0.5" muted preload="metadata" playsinline></video><span class="play">▶</span>
+          <button data-path="${esc(i.path)}" aria-label="Delete video">✕</button></div>`
+      : `<div class="photo" style="background-image:url('${i.url}')"><button data-path="${esc(i.path)}" aria-label="Delete photo">✕</button></div>`).join("")}</div>`).join("")
+    || `<div class="hint">No photos yet.</div>`;
 }
 
 $("save").onclick = async () => {
@@ -216,6 +254,7 @@ $("save").onclick = async () => {
     show_key: $("show_key").checked,
     panels: Object.fromEntries(["todo", "countdown", "cfm", "wotd", "joke"].map((k) => [k, $(`panel-${k}`).checked])),
     come_follow_me_manual: $("come_follow_me_manual").value.trim(),
+    photo_folders: [...document.querySelectorAll(".pick-folder:checked")].map((i) => i.value),
     screen: $("screen-enabled").checked ? { off: $("screen-off").value, on: $("screen-on").value } : { off: "", on: "" },
     dim: $("dim-enabled").checked ? { from: $("dim-from").value, to: $("dim-to").value, level: +$("dim-level").value }
       : { from: "", to: "", level: +$("dim-level").value },
@@ -239,23 +278,68 @@ $("save").onclick = async () => {
 };
 
 $("dim-level").oninput = () => { $("dim-level-label").textContent = `(${$("dim-level").value}%)`; };
-$("add").onclick = () => $("upload").click();
-$("upload").onchange = async (ev) => {
-  const files = [...ev.target.files];
-  for (const [i, f] of files.entries()) {
-    toast(`Uploading ${i + 1} of ${files.length}…`);
-    const name = f.name.replace(/[^\w.\- ]+/g, "_");
-    try { await api("PUT", "/api/photos/" + encodeURIComponent(name), f, true); }
-    catch (e) { toast(`${f.name}: ${e.message}`); }
+// ---- Adding photos/videos: buttons, a folder picker, or drag and drop (files or folders)
+const MEDIA_RE = /\.(jpe?g|png|webp|gif|mp4|mov|m4v|webm)$/i;
+const cleanSeg = (s) => s.replace(/[^\w.\- ()]+/g, "_").replace(/^\.+/, "").slice(0, 100);
+const encPath = (p) => p.split("/").map(encodeURIComponent).join("/");
+async function uploadAll(entries) {   // entries: [{ file, rel: "Folder/Sub/name.jpg" }]
+  const list = entries.filter((e) => MEDIA_RE.test(e.file.name));
+  const skipped = entries.length - list.length;
+  if (!list.length) { toast(skipped ? "Those aren't photos or videos this can show (.jpg .png .mp4 .mov…)" : "Nothing to add"); return; }
+  const into = $("intoFolder").value.trim().split("/").map(cleanSeg).filter(Boolean).join("/");
+  const bar = $("progress"), fill = bar.firstElementChild;
+  bar.style.display = "block";
+  let done = 0, failed = 0;
+  for (const { file, rel } of list) {
+    toast(`Uploading ${done + 1} of ${list.length}…`);
+    const path = [into, ...rel.split("/").map(cleanSeg)].filter(Boolean).join("/");
+    try { await api("PUT", "/api/photos/" + encPath(path), file, true); }
+    catch (e) { failed++; toast(`${file.name}: ${e.message}`); await new Promise((r) => setTimeout(r, 1500)); }
+    done++;
+    fill.style.width = `${(done / list.length) * 100}%`;
   }
-  ev.target.value = "";
-  toast("Photos added");
+  setTimeout(() => { bar.style.display = "none"; fill.style.width = "0"; }, 800);
+  toast(`Added ${done - failed} of ${list.length}${skipped ? ` (skipped ${skipped} other file${skipped > 1 ? "s" : ""})` : ""}`);
   loadPhotos();
+}
+$("add").onclick = () => $("upload").click();
+$("addFolder").onclick = () => $("uploadFolder").click();
+$("upload").onchange = (ev) => { uploadAll([...ev.target.files].map((f) => ({ file: f, rel: f.name }))); ev.target.value = ""; };
+$("uploadFolder").onchange = (ev) => {   // keeps the picked folder's name and any subfolders
+  uploadAll([...ev.target.files].map((f) => ({ file: f, rel: f.webkitRelativePath || f.name }))); ev.target.value = "";
 };
+// Drag and drop: walk dropped folders (browsers hand them over as directory entries).
+function readEntry(entry, prefix = "") {
+  return new Promise((resolve) => {
+    if (entry.isFile) return entry.file((f) => resolve([{ file: f, rel: prefix + f.name }]), () => resolve([]));
+    if (!entry.isDirectory || entry.name.startsWith(".")) return resolve([]);
+    const reader = entry.createReader(), all = [];
+    const batch = () => reader.readEntries(async (ents) => {
+      if (!ents.length) {
+        const nested = await Promise.all(all.map((e) => readEntry(e, `${prefix}${entry.name}/`)));
+        return resolve(nested.flat());
+      }
+      all.push(...ents); batch();
+    }, () => resolve([]));
+    batch();
+  });
+}
+const drop = $("drop");
+["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((t) => drop.addEventListener(t, () => drop.classList.remove("over")));
+window.addEventListener("dragover", (e) => e.preventDefault());   // a missed drop shouldn't open the file
+window.addEventListener("drop", (e) => e.preventDefault());
+drop.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  const items = [...(e.dataTransfer.items || [])].map((i) => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+  const entries = items.length ? (await Promise.all(items.map((en) => readEntry(en)))).flat()
+    : [...e.dataTransfer.files].map((f) => ({ file: f, rel: f.name }));
+  uploadAll(entries);
+});
 $("photos").onclick = async (ev) => {
-  const b = ev.target.closest("button[data-url]");
-  if (!b || !confirm("Delete this photo from the dashboard?")) return;
-  await api("DELETE", "/api/photos/" + b.dataset.url.split("/").pop());
+  const b = ev.target.closest("button[data-path]");
+  if (!b || !confirm("Delete this from the dashboard?")) return;
+  await api("DELETE", "/api/photos/" + encPath(b.dataset.path));
   loadPhotos();
 };
 

@@ -16,6 +16,7 @@ Run:  python server.py            (uses config.json + token.json)
 import argparse
 import datetime as dt
 import glob
+import shutil
 import subprocess
 import html
 import json
@@ -34,6 +35,9 @@ STATIC_DIR = os.path.join(HERE, "static")
 CONFIG_PATH = os.path.join(HERE, "config.json")
 TOKEN_PATH = os.path.join(HERE, "token.json")
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+VIDEO_EXTS = {".mp4", ".webm", ".mov", ".m4v"}
+MEDIA_EXTS = PHOTO_EXTS | VIDEO_EXTS
+MAX_PHOTO_MB, MAX_VIDEO_MB = 40, 1024
 USER_AGENT = "pi-dashboard/1.0 (personal home display)"
 
 SCOPES = [
@@ -59,6 +63,7 @@ DEFAULT_CONFIG = {
     "show_key": True,
     "task_lists": [],
     "photos_dir": "photos",
+    "photo_folders": [],
     "photo_interval_seconds": 60,
     "screen": {"off": "", "on": ""},
     "dim": {"from": "", "to": "", "level": 45},
@@ -509,6 +514,7 @@ EDITABLE = {  # key: validator
     "task_lists": lambda v: [str(x) for x in v][:20],
     "panels": lambda v: {k: bool(v.get(k, True)) for k in ("todo", "countdown", "cfm", "wotd", "joke")},
     "come_follow_me_manual": lambda v: str(v)[:300],
+    "photo_folders": lambda v: [str(x)[:100] for x in v][:100],
     "screen": lambda v: {k: hhmm(v.get(k)) for k in ("off", "on")},
 }
 
@@ -527,6 +533,8 @@ def save_settings(cache, changes):
         cache.cfg.clear()
         cache.cfg.update(load_config())
         cache.fetched.clear()  # refetch everything with the new settings
+        if "photo_folders" in changes:
+            cache.photos_version += 1   # the screen reloads its slideshow list
 
 
 def settings_view(cache):
@@ -543,6 +551,48 @@ def settings_view(cache):
 def photos_dir(cfg):
     p = cfg["photos_dir"]
     return p if os.path.isabs(p) else os.path.join(HERE, p)
+
+
+def media_rel(rel):
+    """Clean a relative path like 'Trips/Beach 2025/IMG_1.jpg' (folders allowed, nothing
+    hidden, no '..'). Returns the OS path relative to the photos folder, or None."""
+    parts = [p.strip() for p in rel.replace("\\", "/").split("/") if p.strip()]
+    if not parts or len(parts) > 5 or any(p in (".", "..") or p.startswith(".") for p in parts):
+        return None
+    if os.path.splitext(parts[-1])[1].lower() not in MEDIA_EXTS:
+        return None
+    return os.path.join(*parts)
+
+
+def list_media(cfg, all_folders=False):
+    """Every photo and video under the photos folder, including subfolders. Unless
+    all_folders, only the top-level folders picked on the settings page ("" = loose files)."""
+    root = photos_dir(cfg)
+    chosen = cfg.get("photo_folders") or []
+    out = []
+    for dirpath, dirnames, files in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+        rel_dir = os.path.relpath(dirpath, root)
+        rel_dir = "" if rel_dir == "." else rel_dir.replace(os.sep, "/")
+        top = rel_dir.split("/")[0]
+        if chosen and not all_folders and top not in chosen:
+            continue
+        for n in sorted(files):
+            ext = os.path.splitext(n)[1].lower()
+            if n.startswith(".") or ext not in MEDIA_EXTS:
+                continue
+            rel = f"{rel_dir}/{n}" if rel_dir else n
+            out.append({"url": "/photos/" + urllib.parse.quote(rel), "path": rel, "folder": rel_dir,
+                        "video": ext in VIDEO_EXTS})
+    return out
+
+
+def media_folders(cfg):
+    root = photos_dir(cfg)
+    try:
+        return sorted(d for d in os.listdir(root) if not d.startswith(".") and os.path.isdir(os.path.join(root, d)))
+    except FileNotFoundError:
+        return []
 
 
 def screenshot():
@@ -606,11 +656,50 @@ def make_handler(cache):
                 raise ValueError("too large")
             return self.rfile.read(n)
 
-        def photo_path(self, path):
-            name = os.path.basename(urllib.parse.unquote(path[len("/api/photos/"):]))
-            if not name or name.startswith(".") or os.path.splitext(name)[1].lower() not in PHOTO_EXTS:
-                return None
-            return os.path.join(photos_dir(cache.cfg), name)
+        def photo_path(self, path, prefix="/api/photos/"):
+            rel = media_rel(urllib.parse.unquote(path[len(prefix):]))
+            return os.path.join(photos_dir(cache.cfg), rel) if rel else None
+
+        def send_file(self, full):
+            """Stream a photo or video, honouring Range requests so videos start playing at once."""
+            size = os.path.getsize(full)
+            ctype = self.guess_type(full)
+            if full.lower().endswith((".mov", ".m4v")):
+                ctype = "video/mp4"   # Chromium plays H.264 .mov files when labelled as mp4
+            start, end = 0, size - 1
+            m = re.match(r"bytes=(\d*)-(\d*)$", self.headers.get("Range", ""))
+            if m and (m.group(1) or m.group(2)):
+                if m.group(1):
+                    start = int(m.group(1))
+                    end = min(int(m.group(2)), size - 1) if m.group(2) else size - 1
+                else:
+                    start = max(0, size - int(m.group(2)))
+                if start > end:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.end_headers()
+                    return
+                self.send_response(206)
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            else:
+                self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", "max-age=3600")
+            self.send_header("Content-Length", str(end - start + 1))
+            self.end_headers()
+            with open(full, "rb") as f:
+                f.seek(start)
+                left = end - start + 1
+                try:
+                    while left > 0:
+                        chunk = f.read(min(256 * 1024, left))
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        left -= len(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # the browser stopped reading (normal for video seeking)
 
         def do_POST(self):
             if urllib.parse.urlparse(self.path).path != "/api/settings":
@@ -623,20 +712,36 @@ def make_handler(cache):
                 return self.send_error(400, str(e)[:100])
             self.send_json({"ok": True})
 
-        def do_PUT(self):  # upload a photo: PUT /api/photos/<name> with the file as the body
+        def do_PUT(self):  # upload: PUT /api/photos/<folder/.../name> with the file as the body
             path = urllib.parse.urlparse(self.path).path
             full = self.photo_path(path) if path.startswith("/api/photos/") else None
             if not full:
-                return self.send_error(400, "Only .jpg .jpeg .png .webp .gif files")
+                return self.send_error(400, "Photos (.jpg .png .webp .gif) or videos (.mp4 .mov .webm .m4v) only")
             if not self.pin_ok():
                 return
-            try:
-                body = self.read_body(40 * 1024 * 1024)
-            except ValueError:
-                return self.send_error(413, "Photo is over 40 MB")
+            n = int(self.headers.get("Content-Length") or 0)
+            video = os.path.splitext(full)[1].lower() in VIDEO_EXTS
+            limit = (MAX_VIDEO_MB if video else MAX_PHOTO_MB) * 1024 * 1024
+            if n > limit:
+                return self.send_error(413, f"{'Video' if video else 'Photo'} is over {limit // 1048576} MB")
             os.makedirs(os.path.dirname(full), exist_ok=True)
-            with open(full, "wb") as f:
-                f.write(body)
+            if shutil.disk_usage(os.path.dirname(full)).free - n < 1024 ** 3:
+                return self.send_error(507, "Not enough free space on the Pi (keeping 1 GB free)")
+            tmp = full + ".part"
+            try:
+                with open(tmp, "wb") as f:   # written in pieces: videos can be large
+                    left = n
+                    while left > 0:
+                        chunk = self.rfile.read(min(1024 * 1024, left))
+                        if not chunk:
+                            raise ConnectionError("upload cut short")
+                        f.write(chunk)
+                        left -= len(chunk)
+                os.replace(tmp, full)
+            except Exception as e:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+                return self.send_error(400, str(e)[:100])
             cache.photos_version += 1
             self.send_json({"ok": True})
 
@@ -648,6 +753,11 @@ def make_handler(cache):
             if not self.pin_ok():
                 return
             os.remove(full)
+            # Tidy up folders left empty (never the photos folder itself).
+            root, d = os.path.abspath(photos_dir(cache.cfg)), os.path.dirname(os.path.abspath(full))
+            while d != root and d.startswith(root) and not os.listdir(d):
+                os.rmdir(d)
+                d = os.path.dirname(d)
             cache.photos_version += 1
             self.send_json({"ok": True})
 
@@ -678,24 +788,16 @@ def make_handler(cache):
                 self.wfile.write(body)
                 return
             if path == "/api/photos":
-                d = photos_dir(cache.cfg)
-                names = sorted(n for n in os.listdir(d) if os.path.splitext(n)[1].lower() in PHOTO_EXTS) \
-                    if os.path.isdir(d) else []
-                return self.send_json({"photos": ["/photos/" + urllib.parse.quote(n) for n in names]})
+                every = "all=1" in (urllib.parse.urlparse(self.path).query or "")
+                items = list_media(cache.cfg, all_folders=every)
+                return self.send_json({"photos": [i["url"] for i in items], "items": items,
+                                       "folders": media_folders(cache.cfg),
+                                       "chosen": cache.cfg.get("photo_folders") or []})
             if path.startswith("/photos/"):
-                name = os.path.basename(urllib.parse.unquote(path[len("/photos/"):]))
-                full = os.path.join(photos_dir(cache.cfg), name)
-                if not name or os.path.splitext(name)[1].lower() not in PHOTO_EXTS or not os.path.isfile(full):
+                full = self.photo_path(path, "/photos/")
+                if not full or not os.path.isfile(full):
                     return self.send_error(404)
-                with open(full, "rb") as f:
-                    body = f.read()
-                self.send_response(200)
-                self.send_header("Content-Type", self.guess_type(full))
-                self.send_header("Cache-Control", "max-age=3600")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-                return
+                return self.send_file(full)
             return super().do_GET()
 
     return Handler

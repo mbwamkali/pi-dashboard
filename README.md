@@ -87,7 +87,9 @@ Then edit `config.json`:
 - `task_lists`: leave `[]` for your default list, or list names, e.g. `["My Tasks", "Groceries"]`.
 - Everything else can be changed later from the settings page on your phone.
 
-Copy photos into `photos/` (landscape pictures look best; they're cropped to fit).
+Copy photos (and videos: .mp4, .mov, .webm) into `photos/`, in subfolders if you like
+(landscape pictures look best; they're cropped to fit). iPhone .heic photos don't show:
+upload them through the settings page in Safari, which converts them to JPEG.
 Then `sudo reboot`. The Pi boots straight into the dashboard. Until Google is
 signed in (`token.json` present) it shows sample calendar and to-do items.
 
@@ -105,7 +107,9 @@ On any phone or computer on your home Wi-Fi, open `http://<pi-ip>:8080/settings`
 - switch 12/24-hour clock, seconds, °F/°C and your town,
 - turn the screen off at night (e.g. 22:30 to 06:00), or dim it in the evening,
 - change each calendar's color on the dashboard,
-- add or delete background photos straight from your phone's camera roll.
+- add or delete background photos **and videos** from your phone's camera roll, or on a
+  computer drag files or whole folders onto the page (folders are kept, and you can choose
+  which folders the slideshow uses). Videos play to the end with the sound off.
 
 Press **Save**; the dashboard picks it up within 30 seconds, no restart. Your
 calendar and to-do list themselves you change as usual in the Google Calendar
@@ -125,7 +129,8 @@ allow up to 100 Google accounts in total, far more than a family needs.
 ## Everyday use
 
 - Hand edits to `config.json`: `sudo systemctl restart pi-dashboard`
-- New photos: upload on the settings page, or copy them into `photos/`.
+- New photos or videos: upload on the settings page, or copy them into `photos/`
+  (e.g. `rsync -av ~/Pictures/Trip/ dashboard@dashboard.local:pi-dashboard/photos/Trip/`).
 - Logs: `journalctl -u pi-dashboard -f`
 - Wrong rotation: `./install.sh 90` (or 180, 270, normal) and reboot.
 - The browser reopens by itself if it ever closes. The mouse pointer is hidden

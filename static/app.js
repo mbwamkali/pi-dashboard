@@ -429,39 +429,72 @@ async function load() {
   }
 }
 
-/* ---------------- Photos ---------------- */
-let photos = [], photoIdx = 0, front = "photoA";
+/* ---------------- Photos + videos ---------------- */
+// Photos show for the set interval; videos play once, muted, from start to finish.
+let media = [], mediaIdx = 0, front = "photoA", mediaTimer = null;
+const MAX_VIDEO_SECONDS = 180;  // a very long video still moves on after 3 minutes
 async function loadPhotos() {
   try {
     const r = await fetch("/api/photos", { cache: "no-store" });
-    const list = (await r.json()).photos;
+    const list = (await r.json()).items || [];
     // No photos yet: give the calendar the space instead of an empty picture area.
     const had = document.body.classList.contains("no-photos");
     document.body.classList.toggle("no-photos", !list.length);
     if (had !== !list.length && lastData) render(lastData);
-    if (list.join() !== [...photos].sort().join()) {
-      photos = list.sort(() => Math.random() - 0.5);
-      photoIdx = 0;
-      if (photos.length) nextPhoto();
+    const sig = (l) => l.map((m) => m.url).sort().join();
+    if (sig(list) !== sig(media)) {
+      media = list.sort(() => Math.random() - 0.5);
+      mediaIdx = 0;
+      nextMedia();
     }
-  } catch (e) { /* keep current photos */ }
+  } catch (e) { /* keep what's showing */ }
 }
-function nextPhoto() {
-  if (!photos.length) return;
-  const url = photos[photoIdx++ % photos.length];
-  const img = new Image();
-  img.onload = () => {
-    const back = front === "photoA" ? "photoB" : "photoA";
-    $(back).style.backgroundImage = `url("${url}")`;
-    $(back).classList.add("show");
-    $(front).classList.remove("show");
-    front = back;
+function scheduleNext(seconds) {
+  clearTimeout(mediaTimer);
+  mediaTimer = setTimeout(nextMedia, seconds * 1000);
+}
+function swapTo(back, fill) {
+  fill($(back));
+  $(back).classList.add("show");
+  const old = $(front);
+  old.classList.remove("show");
+  setTimeout(() => { if (!old.classList.contains("show")) { old.innerHTML = ""; old.style.backgroundImage = ""; } }, 3000);
+  front = back;
+}
+function nextMedia() {
+  clearTimeout(mediaTimer);
+  if (!media.length) return;
+  const item = media[mediaIdx++ % media.length];
+  const back = front === "photoA" ? "photoB" : "photoA";
+  const interval = Math.max(10, settings.photoIntervalSeconds);
+  if (!item.video) {
+    const img = new Image();
+    img.onload = () => swapTo(back, (el) => { el.innerHTML = ""; el.style.backgroundImage = `url("${item.url}")`; });
+    img.onerror = () => scheduleNext(1);
+    img.src = item.url;
+    scheduleNext(interval);
+    return;
+  }
+  const v = document.createElement("video");
+  v.muted = true; v.defaultMuted = true; v.volume = 0;   // never any sound
+  v.setAttribute("muted", ""); v.playsInline = true; v.preload = "auto";
+  v.src = item.url;
+  let started = false;
+  v.oncanplay = () => {
+    if (started) return;
+    started = true;
+    swapTo(back, (el) => { el.style.backgroundImage = ""; el.innerHTML = ""; el.appendChild(v); });
+    v.play().catch(() => scheduleNext(1));
+    const secs = isFinite(v.duration) && v.duration > 0 ? Math.min(v.duration, MAX_VIDEO_SECONDS) : interval;
+    scheduleNext(secs + 1);   // backup in case "ended" never fires
   };
-  img.src = url;
+  v.onended = () => nextMedia();
+  v.onerror = () => scheduleNext(1);   // unsupported format: skip it
+  scheduleNext(20);                    // didn't start loading within 20 s: skip it
 }
 
 /* ---------------- View rotation ---------------- */
-let viewIdx = 0, viewTimer = null, photoTimer = null, timersKey = "";
+let viewIdx = 0, viewTimer = null, timersKey = "";
 const FORCED_VIEW = new URLSearchParams(location.search).get("view");  // settings-page preview
 if (FORCED_VIEW) document.documentElement.classList.add("preview");
 function showView() {
@@ -471,13 +504,12 @@ function showView() {
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
 }
 function applyTimers() {
-  const key = [settings.views.join(), settings.viewSeconds, settings.photoIntervalSeconds].join("|");
+  const key = [settings.views.join(), settings.viewSeconds].join("|");
   if (key === timersKey) return;
   timersKey = key;
-  clearInterval(viewTimer); clearInterval(photoTimer);
+  clearInterval(viewTimer);
   viewIdx = 0; showView();
   viewTimer = setInterval(() => { viewIdx++; showView(); }, Math.max(5, settings.viewSeconds) * 1000);
-  photoTimer = setInterval(nextPhoto, Math.max(10, settings.photoIntervalSeconds) * 1000);
 }
 
 /* ---------------- Start ---------------- */
