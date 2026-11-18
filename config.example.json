@@ -1,0 +1,23 @@
+{
+  "port": 8080,
+  "settings_pin": "",
+
+  "views": ["month", "list"],
+  "view_seconds": 45,
+  "weeks_to_show": 5,
+  "agenda_days": 14,
+  "panels": { "todo": true, "cfm": true, "wotd": true, "joke": true },
+
+  "location": { "name": "Your Town, ST", "latitude": null, "longitude": null },
+  "units": "fahrenheit",
+  "clock_24h": false,
+  "show_seconds": true,
+
+  "calendars": [],
+  "task_lists": [],
+
+  "photos_dir": "photos",
+  "photo_interval_seconds": 60,
+
+  "come_follow_me_manual": "https://www.churchofjesuschrist.org/study/manual/come-follow-me-for-home-and-church-old-testament-2026"
+}

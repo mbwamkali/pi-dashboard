@@ -1,0 +1,10 @@
+# Local settings, Google credentials and personal photos stay on the device
+config.json
+config.json.tmp
+token.json
+client_secret*.json
+photos/*
+!photos/.gitkeep
+.venv/
+__pycache__/
+*.pyc

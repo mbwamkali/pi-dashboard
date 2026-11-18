@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Home Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="board">
+    <section class="hero">
+      <div class="photo" id="photoA"></div>
+      <div class="photo" id="photoB"></div>
+      <div class="shade"></div>
+      <div class="clock">
+        <div class="time"><span id="hm">--:--</span><span class="sec" id="sec"></span><span class="ampm" id="ampm"></span></div>
+        <div class="date" id="date"></div>
+      </div>
+      <div class="weather" id="weather"></div>
+    </section>
+
+    <div class="views">
+      <section class="view month" id="view-month">
+        <div class="calendar" id="calendar"></div>
+      </section>
+
+      <section class="view list" id="view-list">
+        <div class="agenda" id="agenda"></div>
+        <div class="side">
+          <div class="panel todo" id="panel-todo"><h2>To Do</h2><ul id="todo"></ul></div>
+          <div class="panel cfm" id="cfm"></div>
+          <div class="panel wotd" id="wotd"></div>
+          <div class="panel joke" id="joke"></div>
+        </div>
+      </section>
+    </div>
+    <div class="status" id="status"></div>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
