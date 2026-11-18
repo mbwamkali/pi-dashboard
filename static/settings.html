@@ -16,7 +16,37 @@
     body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.45 system-ui, -apple-system, Roboto, sans-serif; }
     header { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
     h1 { font-size: 20px; margin: 0; }
-    main { max-width: 640px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+    /* Phone: one column, preview collapsed at the top. Wide screens: settings on the left,
+       preview on the right staying in view while the settings scroll. */
+    .layout { max-width: 640px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+    main { display: grid; gap: 16px; min-width: 0; }
+    .pane-toggle { width: 100%; display: flex; justify-content: space-between; align-items: center;
+      background: transparent; color: var(--fg); padding: 2px 0; font-size: 15px; text-transform: uppercase;
+      letter-spacing: .06em; }
+    .pane-toggle .chev { color: var(--muted); transition: transform .2s; }
+    .pane.open .pane-toggle .chev { transform: rotate(180deg); }
+    .pane-body { display: none; margin-top: 12px; }
+    .pane.open .pane-body { display: block; }
+    .pane-title { display: none; }
+    @media (min-width: 960px) {
+      .layout { max-width: 1140px; grid-template-columns: minmax(0, 1fr) 400px; align-items: start; gap: 24px; }
+      main { grid-column: 1; grid-row: 1; }
+      .pane { grid-column: 2; grid-row: 1; position: sticky; top: calc(var(--header-h, 77px) + 16px); }
+      .pane-toggle { display: none; }
+      .pane-title { display: block; }
+      .pane-body, .pane.open .pane-body { display: block; margin-top: 0; }
+    }
+    /* Phones: bigger tap targets and calmer spacing */
+    @media (max-width: 600px) {
+      header { padding: 12px 16px; }
+      .layout { padding: 12px; gap: 12px; }
+      section { padding: 14px; }
+      input[type=text], input[type=number], input[type=time], select { min-height: 44px; font-size: 16px; }
+      input[type=checkbox] { width: 26px; height: 26px; }
+      label.row { padding: 12px 0; }
+      .tabs button { flex: 1; }
+      .hint { font-size: 14px; }
+    }
     section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
     h2 { font-size: 15px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
     label.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
@@ -49,9 +79,9 @@
     .tabs button { background: transparent; color: var(--accent); border: 1px solid var(--line); padding: 6px 12px; }
     .tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
     .preview { position: relative; width: 100%; max-width: 360px; margin: 0 auto; overflow: hidden;
-      border-radius: 10px; background: #000; border: 6px solid #222; box-sizing: content-box; }
+      border-radius: 10px; background: #000; border: 6px solid #222; }
     .preview iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; pointer-events: none; }
-    .preview img { display: block; width: 100%; }
+    .preview img { display: block; width: 100%; height: 100%; object-fit: contain; }
     .preview .msg { color: #bbb; padding: 40px 16px; text-align: center; font-size: 14px; }
   </style>
 </head>
@@ -60,17 +90,24 @@
     <h1>Dashboard Settings</h1>
     <button id="save">Save</button>
   </header>
-  <main>
+  <div class="layout">
+  <aside class="pane" id="pane">
     <section>
-      <h2>Preview</h2>
-      <div class="tabs">
-        <button data-p="month" class="on">Month</button>
-        <button data-p="list">List</button>
-        <button data-p="screen">Actual screen</button>
+      <button class="pane-toggle" id="paneToggle" aria-expanded="false" aria-controls="paneBody">
+        <span>Preview</span><span class="chev">▾</span></button>
+      <div class="pane-body" id="paneBody">
+        <h2 class="pane-title">Preview</h2>
+        <div class="tabs">
+          <button data-p="month" class="on">Month</button>
+          <button data-p="list">List</button>
+          <button data-p="screen">Actual screen</button>
+        </div>
+        <div class="preview" id="preview"></div>
+        <div class="hint" id="previewHint" style="text-align:center;margin-top:8px"></div>
       </div>
-      <div class="preview" id="preview"></div>
-      <div class="hint" id="previewHint" style="text-align:center;margin-top:8px"></div>
     </section>
+  </aside>
+  <main>
 
     <section>
       <h2>Screens</h2>
@@ -157,6 +194,7 @@
       <div class="hint">Each January, paste the new year's manual address from churchofjesuschrist.org.</div>
     </section>
   </main>
+  </div>
   <div class="toast" id="toast"></div>
 
 <script>
@@ -348,15 +386,28 @@ const SCREEN_W = 1080, SCREEN_H = 2560;   // the kitchen screen, portrait
 let previewMode = "month";
 // Fit the shrunken dashboard to the box. Only rescales (never reloads), because phones
 // fire "resize" whenever the address bar hides or shows while scrolling.
+const wide = () => matchMedia("(min-width: 960px)").matches;
+const paneVisible = () => wide() || $("pane").classList.contains("open");
 function scalePreview() {
-  const box = $("preview"), frame = box.querySelector("iframe");
-  if (!frame) return;
-  const scale = box.clientWidth / SCREEN_W;
+  document.documentElement.style.setProperty("--header-h", `${document.querySelector("header").offsetHeight}px`);
+  const box = $("preview");
+  if (!paneVisible()) return;
+  box.style.width = "";
+  let w = box.clientWidth;
+  if (wide()) {   // also fit the window's height, so the whole screen stays in view
+    const top = box.getBoundingClientRect().top - $("pane").getBoundingClientRect().top;
+    const room = window.innerHeight - (document.querySelector("header").offsetHeight + 32) - top - 60;
+    w = Math.max(160, Math.min(w, (room * SCREEN_W) / SCREEN_H));
+    box.style.width = `${Math.round(w)}px`;
+  }
+  const scale = w / SCREEN_W;
   box.style.height = `${Math.round(SCREEN_H * scale)}px`;
-  frame.style.transform = `scale(${scale})`;
+  const frame = box.querySelector("iframe");
+  if (frame) frame.style.transform = `scale(${scale})`;
 }
 async function showPreview() {
   const box = $("preview"), hint = $("previewHint");
+  if (!paneVisible()) { box.innerHTML = ""; return; }   // collapsed on a phone: don't load it
   document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.p === previewMode));
   if (previewMode !== "screen") {
     box.innerHTML = `<iframe src="/?view=${previewMode}&t=${Date.now()}" width="${SCREEN_W}" height="${SCREEN_H}"
@@ -366,6 +417,7 @@ async function showPreview() {
     return;
   }
   box.innerHTML = `<div class="msg">Taking a screenshot…</div>`;
+  scalePreview();
   hint.textContent = "";
   try {
     const r = await fetch("/api/screenshot", { headers: { "X-Pin": pin }, cache: "no-store" });
@@ -373,8 +425,8 @@ async function showPreview() {
     if (!r.ok) throw new Error((await r.text()).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 160));
     const power = r.headers.get("X-Screen-Power");
     const url = URL.createObjectURL(await r.blob());
-    box.style.height = "auto";
     box.innerHTML = `<img src="${url}" alt="What the screen shows now">`;
+    scalePreview();
     hint.textContent = `Taken ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` +
       (power === "off" ? " · the screen is turned off right now (night schedule)" : "") + " · tap Actual screen again to refresh";
   } catch (e) {
@@ -382,7 +434,17 @@ async function showPreview() {
   }
 }
 document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => { previewMode = b.dataset.p; showPreview(); });
-window.addEventListener("resize", scalePreview);
+// Phone: tap "Preview" to open or close it.
+$("paneToggle").onclick = () => {
+  const open = $("pane").classList.toggle("open");
+  $("paneToggle").setAttribute("aria-expanded", open);
+  showPreview();
+};
+// Crossing between phone and wide layouts: load or unload the preview as needed.
+let wasWide = wide();
+window.addEventListener("resize", () => {
+  if (wide() !== wasWide) { wasWide = wide(); showPreview(); } else scalePreview();
+});
 
 showPreview();
 load().catch((e) => toast("Couldn't load settings: " + e.message));
