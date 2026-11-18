@@ -51,6 +51,7 @@
       <label class="row"><span>Switch screens every <span class="hint">(seconds)</span></span><input type="number" id="view_seconds" min="5"></label>
       <label class="row"><span>Weeks in month view</span><input type="number" id="weeks_to_show" min="1" max="8"></label>
       <label class="row"><span>Days in list view</span><input type="number" id="agenda_days" min="1" max="31"></label>
+      <label class="row"><span>Calendar key <span class="hint">(colors and names under the clock)</span></span><input type="checkbox" id="show_key"></label>
     </section>
 
     <section>
@@ -63,7 +64,7 @@
 
     <section>
       <h2>Calendars</h2>
-      <div class="hint">None ticked = the calendars that are ticked in Google Calendar.</div>
+      <div class="hint">None ticked = the calendars that are ticked in Google Calendar. The box under each one is its short name in the calendar key.</div>
       <div id="calendars"></div>
       <h2 style="margin-top:16px">Task lists</h2>
       <div class="hint">None ticked = your default list.</div>
@@ -129,9 +130,10 @@ async function api(method, url, body, isFile) {
   return r.json();
 }
 
-function checkList(el, items, chosen) {
+function checkList(el, items, chosen, labels) {
   el.innerHTML = items.map((c) => `<label class="row"><span>${c.color ? `<span class="swatch" style="background:${esc(c.color)}"></span>` : ""}${esc(c.name)}</span>
-    <input type="checkbox" value="${esc(c.id)}" ${chosen.includes(c.id) || chosen.includes(c.name) ? "checked" : ""}></label>`).join("")
+    <input type="checkbox" value="${esc(c.id)}" ${chosen.includes(c.id) || chosen.includes(c.name) ? "checked" : ""}></label>
+    ${labels ? `<input type="text" class="cal-label" data-id="${esc(c.id)}" maxlength="30" placeholder="Name in key: ${esc(String(c.name).split("@")[0])}" value="${esc(labels[c.id] || "")}" style="margin:0 0 6px">` : ""}`).join("")
     || `<div class="hint" style="padding:8px 0">Not available until you've signed in to Google.</div>`;
 }
 const picked = (el) => [...el.querySelectorAll("input:checked")].map((i) => i.value);
@@ -143,13 +145,14 @@ async function load() {
   $("view-list").checked = c.views.includes("list");
   for (const k of ["view_seconds", "weeks_to_show", "agenda_days", "photo_interval_seconds", "come_follow_me_manual", "units"]) $(k).value = c[k];
   for (const k of ["clock_24h", "show_seconds"]) $(k).checked = !!c[k];
+  $("show_key").checked = c.show_key !== false;
   for (const k of ["todo", "cfm", "wotd", "joke"]) $(`panel-${k}`).checked = c.panels?.[k] !== false;
   $("location").value = c.location?.name || "";
   const sc = c.screen || {};
   $("screen-enabled").checked = !!(sc.off && sc.on);
   $("screen-off").value = sc.off || "22:30";
   $("screen-on").value = sc.on || "06:00";
-  checkList($("calendars"), state.sources.calendars, c.calendars || []);
+  checkList($("calendars"), state.sources.calendars, c.calendars || [], c.calendar_labels || {});
   checkList($("taskLists"), state.sources.taskLists, c.task_lists || []);
   $("sourcesError").textContent = state.sourcesError ? `Couldn't load from Google: ${state.sourcesError}` : "";
   loadPhotos();
@@ -170,11 +173,16 @@ $("save").onclick = async () => {
     view_seconds: +$("view_seconds").value, weeks_to_show: +$("weeks_to_show").value,
     agenda_days: +$("agenda_days").value, photo_interval_seconds: +$("photo_interval_seconds").value,
     clock_24h: $("clock_24h").checked, show_seconds: $("show_seconds").checked, units: $("units").value,
+    show_key: $("show_key").checked,
     panels: Object.fromEntries(["todo", "cfm", "wotd", "joke"].map((k) => [k, $(`panel-${k}`).checked])),
     come_follow_me_manual: $("come_follow_me_manual").value.trim(),
     screen: $("screen-enabled").checked ? { off: $("screen-off").value, on: $("screen-on").value } : { off: "", on: "" },
   };
-  if (state.sources.calendars.length) changes.calendars = picked($("calendars"));
+  if (state.sources.calendars.length) {
+    changes.calendars = picked($("calendars"));
+    changes.calendar_labels = Object.fromEntries([...document.querySelectorAll(".cal-label")]
+      .map((i) => [i.dataset.id, i.value.trim()]).filter(([, v]) => v));
+  }
   if (state.sources.taskLists.length) changes.task_lists = picked($("taskLists"));
   // Changing the town clears saved coordinates so it gets looked up again.
   if (loc !== (c.location?.name || "")) changes.location = { name: loc };

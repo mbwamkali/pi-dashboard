@@ -238,12 +238,24 @@ function renderJoke(j) {
   $("joke").innerHTML = j ? `<h2>Dad Joke</h2><p>${esc(j.joke)}</p>` : "";
 }
 
+function renderKey(cal) {
+  const cals = (cal && cal.calendars) || [];
+  const show = settings.showKey !== false && cals.length > 1;
+  $("key").innerHTML = show
+    ? cals.map((c) => `<span><i style="background:${esc(c.color)}"></i>${esc(c.name)}</span>`).join("") : "";
+  const hero = document.querySelector(".hero");
+  hero.classList.toggle("has-key", show);
+  // Lift the clock and weather above the key, however many lines it wraps to.
+  requestAnimationFrame(() => hero.style.setProperty("--key-h", `${show ? $("key").offsetHeight : 0}px`));
+}
+
 function render(data) {
   const p = settings.panels || {};
   for (const [k, id] of [["todo", "panel-todo"], ["cfm", "cfm"], ["wotd", "wotd"], ["joke", "joke"]]) {
     $(id).classList.toggle("hidden", p[k] === false);
   }
   renderWeather(data.weather);
+  renderKey(data.calendar);
   renderCalendar(data.calendar, data.weather);
   renderAgenda(data.calendar, data.weather);
   renderCfm(data.cfm);

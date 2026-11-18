@@ -52,6 +52,8 @@ DEFAULT_CONFIG = {
     "clock_24h": False,
     "show_seconds": True,
     "calendars": [],
+    "calendar_labels": {},
+    "show_key": True,
     "task_lists": [],
     "photos_dir": "photos",
     "photo_interval_seconds": 60,
@@ -90,6 +92,13 @@ def http_get(url, headers=None, timeout=15):
 
 def strip_tags(s):
     return html.unescape(re.sub(r"<[^>]+>", "", s or "")).strip()
+
+
+def calendar_label(cfg, cal_id, name):
+    """Short name for the calendar key: the label set on the settings page, else the
+    calendar's name (an email address becomes just the part before the @)."""
+    label = (cfg.get("calendar_labels") or {}).get(cal_id) or name or ""
+    return label.split("@")[0] if "@" in label else label
 
 
 def grid_range(weeks, agenda_days=0):
@@ -141,6 +150,8 @@ class Google:
         event_colors = cal.colors().get().execute().get("event", {})
 
         events = []
+        key = [{"name": calendar_label(cfg, c["id"], c.get("summaryOverride") or c.get("summary")),
+                "color": c.get("backgroundColor", "#4285f4")} for c in chosen]
         for c in chosen:
             page = None
             while True:
@@ -161,13 +172,13 @@ class Google:
                         "start": s.get("date") or s.get("dateTime"),
                         "end": en.get("date") or en.get("dateTime"),
                         "color": color,
-                        "calendar": c.get("summaryOverride") or c.get("summary"),
+                        "calendar": calendar_label(cfg, c["id"], c.get("summaryOverride") or c.get("summary")),
                     })
                 page = resp.get("nextPageToken")
                 if not page:
                     break
         grid_end = start + dt.timedelta(days=cfg["weeks_to_show"] * 7)
-        return {"start": start.isoformat(), "end": grid_end.isoformat(), "events": events}
+        return {"start": start.isoformat(), "end": grid_end.isoformat(), "events": events, "calendars": key}
 
     def sources(self, cfg):
         """Calendars and task lists available to choose from on the settings page."""
@@ -353,7 +364,10 @@ def demo_calendar(cfg):
         d += dt.timedelta(days=1)
     events.sort(key=lambda e: e["start"])
     grid_end = start + dt.timedelta(days=cfg["weeks_to_show"] * 7)
-    return {"start": start.isoformat(), "end": grid_end.isoformat(), "events": events}
+    key = [{"name": calendar_label(cfg, i, n), "color": c} for i, n, c in
+           (("demo-family", "Family", "#3f51b5"), ("demo-work", "Work", "#e67c73"),
+            ("demo-kids", "Kids", "#33b679"), ("demo-church", "Church", "#f6bf26"))]
+    return {"start": start.isoformat(), "end": grid_end.isoformat(), "events": events, "calendars": key}
 
 
 def demo_sources(cfg):
@@ -424,6 +438,7 @@ class Cache:
                     "viewSeconds": self.cfg["view_seconds"],
                     "agendaDays": self.cfg["agenda_days"],
                     "panels": self.cfg["panels"],
+                    "showKey": self.cfg.get("show_key", True),
                 },
             }
 
@@ -460,6 +475,8 @@ EDITABLE = {  # key: validator
                            "latitude": float(v["latitude"]) if v.get("latitude") not in (None, "") else None,
                            "longitude": float(v["longitude"]) if v.get("longitude") not in (None, "") else None},
     "calendars": lambda v: [str(x) for x in v][:50],
+    "calendar_labels": lambda v: {str(k)[:200]: str(x).strip()[:30] for k, x in list(v.items())[:50] if str(x).strip()},
+    "show_key": bool,
     "task_lists": lambda v: [str(x) for x in v][:20],
     "panels": lambda v: {k: bool(v.get(k, True)) for k in ("todo", "cfm", "wotd", "joke")},
     "come_follow_me_manual": lambda v: str(v)[:300],

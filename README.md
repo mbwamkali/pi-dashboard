@@ -98,7 +98,8 @@ On any phone or computer on your home Wi-Fi, open `http://<pi-ip>:8080/settings`
 
 - turn the month and list screens on or off and set how often they switch,
 - choose how many weeks / days each shows and which panels appear,
-- tick which Google calendars and task lists to show,
+- tick which Google calendars and task lists to show, and give each calendar a short
+  name for the color key under the clock (e.g. an email address → "Grandma"),
 - switch 12/24-hour clock, seconds, °F/°C and your town,
 - turn the screen off at night (e.g. 22:30 to 06:00),
 - add or delete background photos straight from your phone's camera roll.
