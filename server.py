@@ -15,6 +15,8 @@ Run:  python server.py            (uses config.json + token.json)
 
 import argparse
 import datetime as dt
+import glob
+import subprocess
 import html
 import json
 import os
@@ -516,6 +518,27 @@ def photos_dir(cfg):
     return p if os.path.isabs(p) else os.path.join(HERE, p)
 
 
+def screenshot():
+    """PNG of what the Pi's screen shows right now (labwc/Wayland, via grim), plus
+    whether the screen is powered on. Returns (png_bytes, power) or raises."""
+    run = f"/run/user/{os.getuid()}"
+    sockets = sorted(glob.glob(os.path.join(run, "wayland-[0-9]")))
+    if not sockets:
+        raise RuntimeError("No screen session found (only works on the Pi)")
+    env = {**os.environ, "XDG_RUNTIME_DIR": run, "WAYLAND_DISPLAY": os.path.basename(sockets[0])}
+    power = "unknown"
+    try:
+        out = subprocess.run(["wlopm", "-j"], env=env, capture_output=True, timeout=5, text=True).stdout
+        power = "off" if '"off"' in out else "on" if '"on"' in out else "unknown"
+    except Exception:
+        pass
+    img = subprocess.run(["grim", "-l", "1", "-s", "0.5", "-"],
+                         env=env, capture_output=True, timeout=15)
+    if img.returncode != 0 or not img.stdout:
+        raise RuntimeError(img.stderr.decode(errors="replace")[:200] or "grim failed")
+    return img.stdout, power
+
+
 def make_handler(cache):
     class Handler(SimpleHTTPRequestHandler):
         def __init__(self, *a, **kw):
@@ -610,6 +633,21 @@ def make_handler(cache):
                 if not self.pin_ok():
                     return
                 return self.send_json(settings_view(cache))
+            if path == "/api/screenshot":
+                if not self.pin_ok():
+                    return
+                try:
+                    body, power = screenshot()
+                except Exception as e:
+                    return self.send_error(503, str(e)[:150])
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Screen-Power", power)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if path == "/api/photos":
                 d = photos_dir(cache.cfg)
                 names = sorted(n for n in os.listdir(d) if os.path.splitext(n)[1].lower() in PHOTO_EXTS) \

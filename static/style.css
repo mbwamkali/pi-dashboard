@@ -82,6 +82,7 @@ html, body {
   opacity: 0; visibility: hidden; transition: opacity 1.2s ease, visibility 0s linear 1.2s;
 }
 .view.active { opacity: 1; visibility: visible; transition: opacity 1.2s ease, visibility 0s; }
+.preview .view, .preview .photo { transition: none; }
 .view.month { display: flex; flex-direction: column; }
 .view.month .calendar { flex: 1; }
 

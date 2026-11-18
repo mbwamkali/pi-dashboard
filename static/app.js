@@ -309,10 +309,12 @@ function nextPhoto() {
 
 /* ---------------- View rotation ---------------- */
 let viewIdx = 0, viewTimer = null, photoTimer = null, timersKey = "";
+const FORCED_VIEW = new URLSearchParams(location.search).get("view");  // settings-page preview
+if (FORCED_VIEW) document.documentElement.classList.add("preview");
 function showView() {
   const views = (settings.views || []).filter((v) => $(`view-${v}`));
   if (!views.length) views.push("month");
-  const name = views[viewIdx % views.length];
+  const name = FORCED_VIEW && $(`view-${FORCED_VIEW}`) ? FORCED_VIEW : views[viewIdx % views.length];
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
 }
 function applyTimers() {

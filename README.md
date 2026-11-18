@@ -96,6 +96,8 @@ signed in (`token.json` present) it shows sample calendar and to-do items.
 On any phone or computer on your home Wi-Fi, open `http://<pi-ip>:8080/settings`
 (bookmark it). From there you can:
 
+- see a **preview** of the month and list screens (updates after you press Save), or an
+  **actual screenshot** of what the screen shows right now,
 - turn the month and list screens on or off and set how often they switch,
 - choose how many weeks / days each shows and which panels appear,
 - tick which Google calendars and task lists to show, and give each calendar a short

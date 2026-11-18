@@ -36,6 +36,14 @@
     .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 8px; opacity: 0; transition: opacity .3s; pointer-events: none; }
     .toast.show { opacity: 1; }
     .err { color: var(--danger); font-size: 14px; }
+    .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+    .tabs button { background: transparent; color: var(--accent); border: 1px solid var(--line); padding: 6px 12px; }
+    .tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .preview { position: relative; width: 100%; max-width: 360px; margin: 0 auto; overflow: hidden;
+      border-radius: 10px; background: #000; border: 6px solid #222; box-sizing: content-box; }
+    .preview iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; pointer-events: none; }
+    .preview img { display: block; width: 100%; }
+    .preview .msg { color: #bbb; padding: 40px 16px; text-align: center; font-size: 14px; }
   </style>
 </head>
 <body>
@@ -44,6 +52,17 @@
     <button id="save">Save</button>
   </header>
   <main>
+    <section>
+      <h2>Preview</h2>
+      <div class="tabs">
+        <button data-p="month" class="on">Month</button>
+        <button data-p="list">List</button>
+        <button data-p="screen">Actual screen</button>
+      </div>
+      <div class="preview" id="preview"></div>
+      <div class="hint" id="previewHint" style="text-align:center;margin-top:8px"></div>
+    </section>
+
     <section>
       <h2>Screens</h2>
       <label class="row"><span>Month calendar</span><input type="checkbox" id="view-month"></label>
@@ -187,7 +206,7 @@ $("save").onclick = async () => {
   // Changing the town clears saved coordinates so it gets looked up again.
   if (loc !== (c.location?.name || "")) changes.location = { name: loc };
   $("save").disabled = true;
-  try { await api("POST", "/api/settings", changes); toast("Saved. The screen updates within 30 seconds."); await load(); }
+  try { await api("POST", "/api/settings", changes); toast("Saved. The screen updates within 30 seconds."); await load(); showPreview(); }
   catch (e) { toast("Couldn't save: " + e.message); }
   finally { $("save").disabled = false; }
 };
@@ -212,6 +231,48 @@ $("photos").onclick = async (ev) => {
   loadPhotos();
 };
 
+// ---- Preview: the dashboard itself, shrunk to fit, or a real screenshot from the Pi
+const SCREEN_W = 1080, SCREEN_H = 2560;   // the kitchen screen, portrait
+let previewMode = "month";
+// Fit the shrunken dashboard to the box. Only rescales (never reloads), because phones
+// fire "resize" whenever the address bar hides or shows while scrolling.
+function scalePreview() {
+  const box = $("preview"), frame = box.querySelector("iframe");
+  if (!frame) return;
+  const scale = box.clientWidth / SCREEN_W;
+  box.style.height = `${Math.round(SCREEN_H * scale)}px`;
+  frame.style.transform = `scale(${scale})`;
+}
+async function showPreview() {
+  const box = $("preview"), hint = $("previewHint");
+  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.p === previewMode));
+  if (previewMode !== "screen") {
+    box.innerHTML = `<iframe src="/?view=${previewMode}&t=${Date.now()}" width="${SCREEN_W}" height="${SCREEN_H}"
+      title="Dashboard preview"></iframe>`;
+    scalePreview();
+    hint.textContent = "Live preview of the saved settings. It updates after you press Save.";
+    return;
+  }
+  box.innerHTML = `<div class="msg">Taking a screenshot…</div>`;
+  hint.textContent = "";
+  try {
+    const r = await fetch("/api/screenshot", { headers: { "X-Pin": pin }, cache: "no-store" });
+    if (r.status === 401) { await api("GET", "/api/settings"); return showPreview(); }  // asks for the PIN
+    if (!r.ok) throw new Error((await r.text()).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 160));
+    const power = r.headers.get("X-Screen-Power");
+    const url = URL.createObjectURL(await r.blob());
+    box.style.height = "auto";
+    box.innerHTML = `<img src="${url}" alt="What the screen shows now">`;
+    hint.textContent = `Taken ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` +
+      (power === "off" ? " · the screen is turned off right now (night schedule)" : "") + " · tap Actual screen again to refresh";
+  } catch (e) {
+    box.innerHTML = `<div class="msg">Couldn't get a screenshot: ${esc(e.message)}</div>`;
+  }
+}
+document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => { previewMode = b.dataset.p; showPreview(); });
+window.addEventListener("resize", scalePreview);
+
+showPreview();
 load().catch((e) => toast("Couldn't load settings: " + e.message));
 </script>
 </body>
