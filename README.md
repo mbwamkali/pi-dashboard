@@ -17,6 +17,7 @@ Change it from your phone at `http://<pi-ip>:8080/settings` (see below).
 pi-dashboard/
   server.py           small web server + data fetching (Python, stdlib)
   authorize.py        one-time Google sign-in, saves token.json
+  authorize-windows.cmd  the same sign-in on a Windows PC (double-click)
   static/             the dashboard (index.html, style.css, app.js) + settings.html
   docs/               homepage + privacy policy (GitHub Pages, for Google's sign-in screen)
   photos/             put your background pictures here
@@ -62,6 +63,10 @@ The dashboard reads your calendar and tasks with your permission, read-only.
    ```bash
    .venv/bin/python authorize.py      # on a computer: pip install -r requirements.txt first
    ```
+   On **Windows**: put `client_secret.json` in the folder and double-click
+   `authorize-windows.cmd`. It installs Python for that Windows user if needed (via
+   winget), sets up the Google libraries, and runs the same sign-in.
+
    Approve access. It saves `token.json` and prints your calendars and task lists.
    If you did this on another computer, copy `token.json` and `client_secret.json`
    to the Pi's `pi-dashboard` folder.
@@ -104,6 +109,14 @@ and Google Tasks apps; the screen refreshes them every 5 minutes.
 
 The settings page is open to anyone on your Wi-Fi. To require a PIN, set
 `"settings_pin": "1234"` in `config.json` and restart (`sudo systemctl restart pi-dashboard`).
+
+## Another household
+
+Family members can run their own dashboard with this same Google app: set up their
+own Pi (sections 1 and 3), copy your `client_secret.json` into their `pi-dashboard`
+folder, and run the sign-in with **their** Google account (step 2.6, on the Pi or a
+Windows/Mac/Linux computer). Their calendar data goes only to their Pi. Unverified apps
+allow up to 100 Google accounts in total, far more than a family needs.
 
 ## Everyday use
 
